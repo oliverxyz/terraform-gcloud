@@ -9,6 +9,7 @@
 | actAs / `roles/iam.serviceAccountUser` (п. 7, 13) | прямой ответ | Этап 5, аккаунт узлов GKE |
 | Аргумент `service_account_id` (п. 21) | подсказка 3 | Этап 5, Workload Identity |
 | Bootstrap и impersonation (п. 22) | прямой ответ | Шаг 0.3 и начало этапа 1 |
+| Custom mode VPC и secondary ranges (п. 40) | прямой ответ | Шаг 1.2, подсеть для GKE |
 
 Аварийные выходы: пока не использовались.
 
@@ -56,3 +57,19 @@
 35. **Ручные изменения через консоль — это drift.** Terraform находит их на refresh перед `plan` («Objects have changed outside of Terraform»). Работает, но лучше менять всё через код, иначе state и реальность расходятся.
 36. **Блокировка state в GCS:** второй `apply` по умолчанию сразу падает с «Error acquiring the state lock», а не ждёт; ждать заставляет `-lock-timeout`. Блокировка — объект `.tflock` рядом со state.
 37. **Восстановление state из версии:** `gcloud storage ls -a` показывает поколения объекта; нужное копируется поверх текущего, затем `plan` проверяет расхождения с реальностью.
+
+## Этап 1. Сеть
+
+38. **Имена API обманчивы.** `sqladmin` (не только `sql-component`), `storage` (не `storage-component`), `servicenetworking` (не `networkservices`), `artifactregistry` (Container Registry — устаревший предшественник). Сверяй API с разделом *Enable the API* в документации сервиса.
+39. **`disable_on_destroy = false` для `google_project_service`.** Иначе `destroy` выключит API и может задеть ресурсы, которые от него зависят (включая bootstrap). Service Usage и Resource Manager через Terraform не трогаем — через них Terraform сам работает.
+40. **VPC в custom mode.** Auto mode создаёт подсеть в каждом регионе с диапазонами Google; свои secondary ranges для подов и сервисов GKE (VPC-native) и контроль адресации даёт только custom mode. **[прямой ответ]**
+41. **`plan -out` — бинарный файл с state, конфигурацией и значениями.** Относиться как к секрету, держать в `.gitignore`. Текст для чтения — `terraform plan -no-color > file` или `terraform show -no-color <план>`.
+42. **`plan` не проверяет авторизацию полностью.** При пустом state читать из API нечего, поэтому ошибка в `impersonate_service_account` (нужен полный email, а не короткий ID) всплывёт только на `apply`.
+43. **`depends_on` — явная зависимость там, где нет ссылки** (API → ресурс). На ресурс с `for_each` можно сослаться целиком или на конкретный экземпляр по ключу.
+44. **GKE выдаёт каждому узлу целый блок из диапазона подов** (`/24` при `max_pods_per_node` = 110). Диапазон подов считается как «узлов × блок», а не «сколько подов нужно»: 2 узла → `/23`.
+45. **CIDR-блок начинается с адреса, кратного своему размеру** (`/23` — с чётного третьего октета). План адресов: primary `192.168.0.0/28`, pods `192.168.2.0/23`, services `192.168.4.0/26`, Cloud SQL `192.168.6.0/24`.
+46. **VM без внешнего IP по умолчанию не достаёт до API Google.** `private_ip_google_access` на подсети открывает путь к `*.googleapis.com` по внутренней сети, без NAT.
+47. **Cloud NAT — только исходящий трафик** (узел/под начинает соединение, ответы возвращаются). Входящий доступ к приложению идёт через LoadBalancer/Ingress, а не через NAT. NAT нужен для интернета вне API Google: Docker Hub, внешние API, пакеты.
+48. **GKE находит secondary-диапазоны по `range_name`**, а не по имени подсети: в кластере (`ip_allocation_policy`) указываются подсеть и имена диапазонов для подов и сервисов.
+49. **Предусловия bootstrap — API, через которые работает сам Terraform** (`cloudresourcemanager`, `serviceusage`). Включаются вручную (`gcloud services enable`) или в bootstrap, а не тем же кодом. «API has not been used in project N» — проверь, что N — номер твоего проекта, и включи API.
+50. **`(known after apply)` у аргумента, который ты собирался задать, — значит, ты его не задал.** Пропущенный `private_ip_google_access` дал бы `false` по умолчанию и `ImagePullBackOff` на приватных узлах. Переименование ресурса после `apply` = удаление + создание. **[прямой ответ]**

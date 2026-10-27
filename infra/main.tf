@@ -19,11 +19,11 @@ resource "google_compute_network" "network" {
 }
 
 resource "google_compute_subnetwork" "kubernetes_subnetwork" {
-  name          = "kubernetes-subnet"
-  region        = var.region
-  network       = google_compute_network.network.id
+  name                     = "kubernetes-subnet"
+  region                   = var.region
+  network                  = google_compute_network.network.id
   private_ip_google_access = true
-  ip_cidr_range = "192.168.0.0/24"
+  ip_cidr_range            = "192.168.0.0/24"
 
   secondary_ip_range {
     range_name    = "pods-secondary-range"
@@ -34,4 +34,27 @@ resource "google_compute_subnetwork" "kubernetes_subnetwork" {
     range_name    = "services-secondary-range"
     ip_cidr_range = "192.168.4.0/24"
   }
+}
+
+resource "google_compute_router" "compute_router" {
+  count   = var.create_router ? 1 : 0
+  region  = var.region
+  name    = "my-router"
+  network = google_compute_network.network.id
+}
+
+resource "google_compute_router_nat" "compute_router_nat" {
+  count = var.create_router ? 1 : 0
+
+  router                             = google_compute_router.compute_router[0].name
+  name                               = "my-router-nat"
+  region                             = var.region
+  source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
+  subnetwork {
+    name                    = google_compute_subnetwork.kubernetes_subnetwork.id
+    source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
+  }
+
+
+  nat_ip_allocate_option = "AUTO_ONLY"
 }

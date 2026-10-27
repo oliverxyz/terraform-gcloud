@@ -13,3 +13,8 @@ variable "zone" {
 variable "sa_email" {
   type = string
 }
+
+variable "create_router" {
+  type    = bool
+  default = false
+}

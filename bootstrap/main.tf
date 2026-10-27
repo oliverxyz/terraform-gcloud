@@ -23,7 +23,7 @@ resource "google_service_account_iam_member" "account_iam" {
 }
 
 resource "google_storage_bucket" "terraform_storage" {
-  name                        = "${var.project_id}-terraform-state"
+  name                        = "${var.project_id}-terraform"
   location                    = var.region
   force_destroy               = false
   uniform_bucket_level_access = true
